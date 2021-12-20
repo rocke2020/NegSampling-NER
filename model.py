@@ -38,33 +38,54 @@ class PhraseClassifier(nn.Module):
         return self._classifier(table)
 
     def _pre_process_input(self, utterances):
-        lengths = [len(s) for s in utterances]
-        max_len = max(lengths)
-        pieces = iterative_support(self._lexical_vocab.tokenize, utterances)
+        """ utterances, batch of sentences: List[List[str]], List[str] is one sentence.
+        sentence 1
+        words:    word0, word1, word2,
+        tokens:   (token0, token1), (token2), (token3, token4)
+        position: 0, 2, 3
+        start:    1, 3, 4, 7
+
+        sentence 2
+        words:    word0, word1, word2, word3
+        tokens:   (token0, token1), (token2), (token3, token4), (token5)
+        position: 0, 2, 3, 5
+        start:    1, 3, 4, 6
+        
+        max_words_number is the max word numbers of each sentence in batch sentences
+        max_tokens_number is the max token numbers of each sentence in batch sentences
+        max_tokens_number = 6
+        max_words_number = 4
+        
+        """
+        words_number_in_sentences = [len(s) for s in utterances]
+        # max_words_number is the max words numbers in batch sentences
+        max_words_number = max(words_number_in_sentences)
+        batch_sentences = iterative_support(self._lexical_vocab.tokenize, utterances)
         units, positions = [], []
 
-        for tokens in pieces:
-            units.append(flat_list(tokens))
-            cum_list = np.cumsum([len(p) for p in tokens]).tolist()
+        for tokens_groups in batch_sentences:
+            units.append(flat_list(tokens_groups))
+            cum_list = np.cumsum([len(tokens_per_word) for tokens_per_word in tokens_groups]).tolist()
             positions.append([0] + cum_list[:-1])
 
         sizes = [len(u) for u in units]
-        max_size = max(sizes)
+        # max_tokens_number is the max token numbers of each sentence in batch sentences
+        max_tokens_number = max(sizes)
         cls_sign = self._lexical_vocab.CLS_SIGN
         sep_sign = self._lexical_vocab.SEP_SIGN
         pad_sign = self._lexical_vocab.PAD_SIGN
-        pad_unit = [[cls_sign] + s + [sep_sign] + [pad_sign] * (max_size - len(s)) for s in units]
-        starts = [[ln + 1 for ln in u] + [max_size + 1] * (max_len - len(u)) for u in positions]
+        pad_unit = [[cls_sign] + s + [sep_sign] + [pad_sign] * (max_tokens_number - len(s)) for s in units]
+        starts = [[ln + 1 for ln in u] + [max_tokens_number + 1] * (max_words_number - len(u)) for u in positions]
 
         var_unit = torch.LongTensor([self._lexical_vocab.index(u) for u in pad_unit])
-        attn_mask = torch.LongTensor([[1] * (lg + 2) + [0] * (max_size - lg) for lg in sizes])
+        attn_mask = torch.LongTensor([[1] * (lg + 2) + [0] * (max_tokens_number - lg) for lg in sizes])
         var_start = torch.LongTensor(starts)
 
         if torch.cuda.is_available():
             var_unit = var_unit.cuda()
             attn_mask = attn_mask.cuda()
             var_start = var_start.cuda()
-        return var_unit, attn_mask, var_start, lengths
+        return var_unit, attn_mask, var_start, words_number_in_sentences
 
     def _pre_process_output(self, entities, lengths):
         positions, labels = [], []
@@ -96,10 +117,10 @@ class PhraseClassifier(nn.Module):
         return positions, var_lbl
 
     def estimate(self, sentences, segments):
-        var_sent, attn_mask, start_mat, lengths = self._pre_process_input(sentences)
+        var_sent, attn_mask, start_mat, words_number_in_sentences = self._pre_process_input(sentences)
         score_t = self(var_sent, mask_mat=attn_mask, starts=start_mat)
 
-        positions, targets = self._pre_process_output(segments, lengths)
+        positions, targets = self._pre_process_output(segments, words_number_in_sentences)
         flat_s = torch.cat([score_t[[i], j, k] for i, j, k in positions], dim=0)
         return self._criterion(torch.log_softmax(flat_s, dim=-1), targets)
 
@@ -153,8 +174,10 @@ class BERT(nn.Module):
         all_hidden, _ = self._repr_model(var_h, attention_mask=attn_mask, output_all_encoded_layers=False)
 
         batch_size, _, hidden_dim = all_hidden.size()
-        _, unit_num = starts.size()
-        positions = starts.unsqueeze(-1).expand(batch_size, unit_num, hidden_dim)
+        # starts shape: batch_size, words_num in each sentence
+        _, words_num = starts.size()
+        positions = starts.unsqueeze(-1).expand(batch_size, words_num, hidden_dim)
+        # return shape: batch-size, words_num, hid_dim
         return torch.gather(all_hidden, dim=-2, index=positions)
 
 
