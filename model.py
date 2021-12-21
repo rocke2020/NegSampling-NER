@@ -1,5 +1,5 @@
 import numpy as np
-
+from typing import List
 import torch
 from torch import nn
 from pytorch_pretrained_bert import BertModel
@@ -29,15 +29,20 @@ class PhraseClassifier(nn.Module):
         self._criterion = nn.NLLLoss()
 
     def forward(self, var_h, **kwargs):
+        """ output shape: batch_size, word_num, word_num, len(label_vocab) """
+        # shape: batch-size, words_num, hid_dim
         con_repr = self._encoder(var_h, kwargs["mask_mat"], kwargs["starts"])
 
-        batch_size, token_num, hidden_dim = con_repr.size()
-        ext_row = con_repr.unsqueeze(2).expand(batch_size, token_num, token_num, hidden_dim)
+        batch_size, word_num, hidden_dim = con_repr.size()
+        ext_row = con_repr.unsqueeze(2).expand(batch_size, word_num, word_num, hidden_dim)
         ext_column = con_repr.unsqueeze(1).expand_as(ext_row)
+        # table shape: 
         table = torch.cat([ext_row, ext_column, ext_row - ext_column, ext_row * ext_column], dim=-1)
-        return self._classifier(table)
+        # shape: batch_size, word_num, word_num, len(label_vocab)
+        result = self._classifier(table)
+        return result
 
-    def _pre_process_input(self, utterances):
+    def _pre_process_input(self, utterances: List[List[str]]):
         """ utterances, batch of sentences: List[List[str]], List[str] is one sentence.
         sentence 1
         words:    word0, word1, word2,
@@ -57,9 +62,9 @@ class PhraseClassifier(nn.Module):
         max_words_number = 4
         
         """
-        words_number_in_sentences = [len(s) for s in utterances]
+        words_num_in_sentences = [len(s) for s in utterances]
         # max_words_number is the max words numbers in batch sentences
-        max_words_number = max(words_number_in_sentences)
+        max_words_number = max(words_num_in_sentences)
         batch_sentences = iterative_support(self._lexical_vocab.tokenize, utterances)
         units, positions = [], []
 
@@ -85,9 +90,13 @@ class PhraseClassifier(nn.Module):
             var_unit = var_unit.cuda()
             attn_mask = attn_mask.cuda()
             var_start = var_start.cuda()
-        return var_unit, attn_mask, var_start, words_number_in_sentences
+        return var_unit, attn_mask, var_start, words_num_in_sentences
 
-    def _pre_process_output(self, entities, lengths):
+    def _pre_process_output(self, entities, words_num_in_sentences):
+        """  
+        sentences: [['Somerset', '83', 'and', '174', '(', 'P.', 'Simmons', '4-38', ')', '.']]
+        entities: [[(0, 0, 'ORG'), (5, 6, 'PER')]]
+        """        
         positions, labels = [], []
         batch_size = len(entities)
 
@@ -98,7 +107,7 @@ class PhraseClassifier(nn.Module):
 
         for utt_i in range(0, batch_size):
             reject_set = [(e[0], e[1]) for e in entities[utt_i]]
-            s_len = lengths[utt_i]
+            s_len = words_num_in_sentences[utt_i]
             neg_num = int(s_len * self._neg_rate) + 1
 
             candies = flat_list([[(i, j) for j in range(i, s_len) if (i, j) not in reject_set] for i in range(s_len)])
@@ -116,11 +125,17 @@ class PhraseClassifier(nn.Module):
             var_lbl = var_lbl.cuda()
         return positions, var_lbl
 
-    def estimate(self, sentences, segments):
-        var_sent, attn_mask, start_mat, words_number_in_sentences = self._pre_process_input(sentences)
+    def estimate(self, sentences, entities):
+        """  
+        sentences: [['Somerset', '83', 'and', '174', '(', 'P.', 'Simmons', '4-38', ')', '.']]
+        entities: [[(0, 0, 'ORG'), (5, 6, 'PER')]]
+        """
+        var_sent, attn_mask, start_mat, words_num_in_sentences = self._pre_process_input(sentences)
+        # score_t shape: batch_size, word_num, word_num, len(label_vocab)
         score_t = self(var_sent, mask_mat=attn_mask, starts=start_mat)
 
-        positions, targets = self._pre_process_output(segments, words_number_in_sentences)
+        positions, targets = self._pre_process_output(entities, words_num_in_sentences)
+        # flat_s shape: labels_num, len(label_vocab)
         flat_s = torch.cat([score_t[[i], j, k] for i, j, k in positions], dim=0)
         return self._criterion(torch.log_softmax(flat_s, dim=-1), targets)
 
