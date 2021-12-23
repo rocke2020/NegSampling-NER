@@ -1,6 +1,6 @@
 # Ignore dirs:
 __pycache__
-/datasets
+/dataset
 /.idea
 /save
 /logs

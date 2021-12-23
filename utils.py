@@ -8,7 +8,10 @@ from transformers import BertTokenizer
 
 from misc import extract_json_data
 from misc import iob_tagging, f1_score
+from common_utils import get_logger
+import logging
 
+logger = get_logger(name=__name__, log_file=None, log_level=logging.DEBUG, log_level_name='')
 
 class UnitAlphabet(object):
 
@@ -53,7 +56,10 @@ class LabelAlphabet(object):
 
 def corpus_to_iterator(file_path, batch_size, if_shuffle, label_vocab=None):
     material = extract_json_data(file_path)
-    instances = [(eval(e["sentence"]), eval(e["labeled entities"])) for e in material]
+    instances = [(e["sentence"], e["labeled entities"]) for e in material]
+    # instances = [(eval(e["sentence"]), eval(e["labeled entities"])) for e in material]
+    logger.info(f'file path {file_path}')
+    logger.info(instances[:5])
 
     if label_vocab is not None:
         label_vocab.add("O")
@@ -90,7 +96,7 @@ class Procedure(object):
         model.train()
         time_start, total_penalties = time.time(), 0.0
 
-        for batch in tqdm(dataset, ncols=50):
+        for batch in tqdm(dataset, ncols=50, desc='train'):
             loss = model.estimate(*batch)
             total_penalties += loss.cpu().item()
 
@@ -107,7 +113,7 @@ class Procedure(object):
         time_start = time.time()
         seqs, outputs, oracles = [], [], []
 
-        for sentences, segments in tqdm(dataset, ncols=50):
+        for sentences, segments in tqdm(dataset, ncols=50, desc='dev/test'):
             with torch.no_grad():
                 predictions = model.inference(sentences)
 

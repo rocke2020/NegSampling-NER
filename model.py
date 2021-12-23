@@ -30,13 +30,13 @@ class PhraseClassifier(nn.Module):
 
     def forward(self, var_h, **kwargs):
         """ output shape: batch_size, word_num, word_num, len(label_vocab) """
-        # shape: batch-size, words_num, hid_dim
+        # shape: batch-size, words_num, bert_hid_dim
         con_repr = self._encoder(var_h, kwargs["mask_mat"], kwargs["starts"])
 
-        batch_size, word_num, hidden_dim = con_repr.size()
-        ext_row = con_repr.unsqueeze(2).expand(batch_size, word_num, word_num, hidden_dim)
+        batch_size, word_num, bert_hid_dim = con_repr.size()
+        ext_row = con_repr.unsqueeze(2).expand(batch_size, word_num, word_num, bert_hid_dim)
         ext_column = con_repr.unsqueeze(1).expand_as(ext_row)
-        # table shape: 
+        # table shape: batch_size, word_num, word_num, 4 * bert_hid_dim
         table = torch.cat([ext_row, ext_column, ext_row - ext_column, ext_row * ext_column], dim=-1)
         # shape: batch_size, word_num, word_num, len(label_vocab)
         result = self._classifier(table)
@@ -144,8 +144,8 @@ class PhraseClassifier(nn.Module):
         # shape: batch_size, word_num, word_num, len(label_vocab)
         log_items = self(var_sent, mask_mat=attn_mask, starts=starts)
 
-        score_t = torch.log_softmax(log_items, dim=-1)
-        val_table, idx_table = torch.max(score_t, dim=-1)
+        # score_t = torch.log_softmax(log_items, dim=-1)
+        val_table, idx_table = torch.max(log_items, dim=-1)
         # shape: batch_size, word-num, word-num
         listing_it = idx_table.cpu().numpy().tolist()
         listing_vt = val_table.cpu().numpy().tolist()
@@ -188,14 +188,14 @@ class BERT(nn.Module):
         return 768
 
     def forward(self, var_h, attn_mask, starts):
-        all_hidden, _ = self._repr_model(var_h, attention_mask=attn_mask, output_all_encoded_layers=False)
-
-        batch_size, _, hidden_dim = all_hidden.size()
+        outputs = self._repr_model(var_h, attention_mask=attn_mask)
+        last_hidden_states = outputs[0]
+        batch_size, _, hidden_dim = last_hidden_states.size()
         # starts shape: batch_size, words_num in each sentence
         _, words_num = starts.size()
         positions = starts.unsqueeze(-1).expand(batch_size, words_num, hidden_dim)
         # return shape: batch-size, words_num, hid_dim
-        return torch.gather(all_hidden, dim=-2, index=positions)
+        return torch.gather(last_hidden_states, dim=-2, index=positions)
 
 
 class MLP(nn.Module):
