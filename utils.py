@@ -4,7 +4,7 @@ import time
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
-from pytorch_pretrained_bert import BertTokenizer
+from transformers import BertTokenizer
 
 from misc import extract_json_data
 from misc import iob_tagging, f1_score
@@ -102,7 +102,7 @@ class Procedure(object):
         return total_penalties, time_con
 
     @staticmethod
-    def test(model, dataset, eval_path):
+    def test(model, dataset, eval_script_path):
         model.eval()
         time_start = time.time()
         seqs, outputs, oracles = [], [], []
@@ -115,5 +115,5 @@ class Procedure(object):
             outputs.extend([iob_tagging(e, len(u)) for e, u in zip(predictions, sentences)])
             oracles.extend([iob_tagging(e, len(u)) for e, u in zip(segments, sentences)])
 
-        out_f1 = f1_score(seqs, outputs, oracles, eval_path)
+        out_f1 = f1_score(seqs, outputs, oracles, eval_script_path)
         return out_f1, time.time() - time_start

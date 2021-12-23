@@ -4,11 +4,14 @@ import codecs
 import os
 import numpy as np
 import random
-
+from typing import List
 import torch
 
 
 def iterative_support(func, query):
+    """  
+    keep the orig shape, just convert to list
+    """
     if isinstance(query, (list, tuple, set)):
         return [iterative_support(func, i) for i in query]
     return func(query)
@@ -65,15 +68,16 @@ def f1_score(sent_list, pred_list, gold_list, script_path):
     return float(msg.split('\n')[3].split(':')[-1].strip())
 
 
-def iob_tagging(entities, s_len):
+def iob_tagging(entities, s_len) -> List: 
+    """ return tags as sentence length """
     tags = ["O"] * s_len
 
-    for el, er, et in entities:
-        for i in range(el, er + 1):
-            if i == el:
-                tags[i] = "B-" + et
+    for e_left, e_right, entity in entities:
+        for i in range(e_left, e_right + 1):
+            if i == e_left:
+                tags[i] = "B-" + entity
             else:
-                tags[i] = "I-" + et
+                tags[i] = "I-" + entity
     return tags
 
 

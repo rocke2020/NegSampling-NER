@@ -3,8 +3,7 @@ import os
 import json
 
 import torch
-from pytorch_pretrained_bert import BertAdam
-
+from transformers import AdamW
 from utils import UnitAlphabet, LabelAlphabet
 from model import PhraseClassifier
 from misc import fix_random_seed
@@ -47,7 +46,7 @@ if __name__ == "__main__":
     grouped_param = [{'params': [p for n, p in all_parameters if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
                      {'params': [p for n, p in all_parameters if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}]
     total_steps = int(len(train_loader) * (args.epoch_num + 1))
-    optimizer = BertAdam(grouped_param, lr=1e-5, warmup=args.warmup_proportion, t_total=total_steps)
+    optimizer = AdamW(grouped_param, lr=1e-5, warmup=args.warmup_proportion, t_total=total_steps)
 
     if not os.path.exists(args.check_dir):
         os.makedirs(args.check_dir)

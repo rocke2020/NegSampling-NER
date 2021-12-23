@@ -2,7 +2,7 @@ import numpy as np
 from typing import List
 import torch
 from torch import nn
-from pytorch_pretrained_bert import BertModel
+from transformers import BertModel
 
 from misc import flat_list
 from misc import iterative_support, conflict_judge
@@ -140,27 +140,29 @@ class PhraseClassifier(nn.Module):
         return self._criterion(torch.log_softmax(flat_s, dim=-1), targets)
 
     def inference(self, sentences):
-        var_sent, attn_mask, starts, lengths = self._pre_process_input(sentences)
+        var_sent, attn_mask, starts, words_num_in_sentences = self._pre_process_input(sentences)
+        # shape: batch_size, word_num, word_num, len(label_vocab)
         log_items = self(var_sent, mask_mat=attn_mask, starts=starts)
 
         score_t = torch.log_softmax(log_items, dim=-1)
         val_table, idx_table = torch.max(score_t, dim=-1)
-
+        # shape: batch_size, word-num, word-num
         listing_it = idx_table.cpu().numpy().tolist()
         listing_vt = val_table.cpu().numpy().tolist()
+        # convert idx to label item, such as "O", 'PER', shape not changed.
         label_table = iterative_support(self._label_vocab.get, listing_it)
 
         candidates = []
-        for l_mat, v_mat, sent_l in zip(label_table, listing_vt, lengths):
+        for label_mat, val_mat, sent_len in zip(label_table, listing_vt, words_num_in_sentences):
             candidates.append([])
-            for i in range(0, sent_l):
-                for j in range(i, sent_l):
-                    if l_mat[i][j] != "O":
-                        candidates[-1].append((i, j, l_mat[i][j], v_mat[i][j]))
+            for i in range(0, sent_len):
+                for j in range(i, sent_len):
+                    if label_mat[i][j] != "O":
+                        candidates[-1].append((i, j, label_mat[i][j], val_mat[i][j]))
 
         entities = []
         for segments in candidates:
-            ordered_seg = sorted(segments, key=lambda e: -e[-1])
+            ordered_seg = sorted(segments, key=lambda e: e[-1], reverse=True)
             filter_list = []
             for elem in ordered_seg:
                 flag = False
